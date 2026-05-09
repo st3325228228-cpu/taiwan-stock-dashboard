@@ -1747,7 +1747,7 @@ def main():
     # ── 控制列 ────────────────────────────────────────────────────
     c1, c2, c3, c4, c5, c6 = st.columns([2.5, 4, 1.2, 1.2, 1.2, 2])
     with c1:
-        ticker_input = st.text_input("股票代號"
+        ticker_input = st.text_input("股票代號",
             value=st.session_state.get("ticker", "2330.TW"),
             placeholder="2330 / 2330.TW / TSLA")
     with c2:
