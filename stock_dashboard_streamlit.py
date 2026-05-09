@@ -1745,24 +1745,25 @@ def main():
         unsafe_allow_html=True)
 
     # ── 控制列 ────────────────────────────────────────────────────
-    c1, c2, c3, c4, c5, c6 = st.columns([2.5, 4, 1.2, 1.2, 1.2, 2])
+    c1, c2, c3, c4, c5, c6 = st.columns([2, 3.5, 1.5, 1.5, 1.2, 2])
     with c1:
         ticker_input = st.text_input("股票代號",
-            value=st.session_state.get("ticker", "2330.TW"),
-            placeholder="2330 / 2330.TW / TSLA")
+                value=st.session_state.get("ticker", "2330.TW"),
+                placeholder="2330 / 2330.TW / TSLA")
     with c2:
-        period_days = st.slider("查詢天數　📅", 30, 365,
-            st.session_state.get("period", 90), 15,
-            format="%d 天")
+        period_days = st.slider("查詢天數", 30, 365,
+                st.session_state.get("period", 90), 15,
+                format="%d 天")
     with c3:
-        show_bb  = st.checkbox("布林通道",
-            value=st.session_state.get("show_bb", False))
+        show_bb  = st.checkbox("布林",
+                value=st.session_state.get("show_bb", False))
     with c4:
-        show_fib = st.checkbox("費波那契",
-            value=st.session_state.get("show_fib", False))
+        show_fib = st.checkbox("費波",
+                value=st.session_state.get("show_fib", False))
     with c5:
         show_vwap = st.checkbox("VWAP",
-            value=st.session_state.get("show_vwap", True))
+                value=st.session_state.get("show_vwap", True))
+
     with c6:
         st.markdown("<br>", unsafe_allow_html=True)
         query_btn = st.button("🔍 查詢分析", use_container_width=True)
