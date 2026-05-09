@@ -1,0 +1,16 @@
+# .streamlit/config.toml
+
+[server]
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+
+[theme]
+base = "dark"
+backgroundColor = "#050A14"
+secondaryBackgroundColor = "#08101E"
+textColor = "#C0CCD8"
+primaryColor = "#00C8FF"
+
+[browser]
+gatherUsageStats = false
