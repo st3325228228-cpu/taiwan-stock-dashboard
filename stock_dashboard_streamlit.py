@@ -1745,14 +1745,15 @@ def main():
         unsafe_allow_html=True)
 
     # ── 控制列 ────────────────────────────────────────────────────
-    c1, c2, c3, c4, c5, c6 = st.columns([3, 3, 1.5, 1.5, 1.5, 2])
+    c1, c2, c3, c4, c5, c6 = st.columns([2.5, 4, 1.2, 1.2, 1.2, 2])
     with c1:
-        ticker_input = st.text_input("股票代號",
-            value=st.session_state.get("ticker","2330.TW"),
+        ticker_input = st.text_input("股票代號"
+            value=st.session_state.get("ticker", "2330.TW"),
             placeholder="2330 / 2330.TW / TSLA")
     with c2:
-        period_days = st.slider("查詢天數", 30, 365,
-            st.session_state.get("period", 90), 15)
+        period_days = st.slider("查詢天數　📅", 30, 365,
+            st.session_state.get("period", 90), 15,
+            format="%d 天")
     with c3:
         show_bb  = st.checkbox("布林通道",
             value=st.session_state.get("show_bb", False))
