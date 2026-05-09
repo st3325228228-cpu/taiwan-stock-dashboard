@@ -62,61 +62,20 @@ HEADERS = {
 # ══════════════════════════════════════════════════════════════════
 #  全域 CSS
 # ══════════════════════════════════════════════════════════════════
-st.markdown(f"""
+st.markdown("""
 <style>
-  .stApp, .main, [data-testid="stAppViewContainer"] {{
-      background-color: {BG} !important; color: {TEXT} !important;
-  }}
-  [data-testid="stHeader"], [data-testid="stSidebar"] {{
-      background-color: {PANEL} !important;
-  }}
-  .stTextInput input, .stNumberInput input {{
-      background-color: {CARD} !important;
-      border: 1px solid {BORD} !important;
-      color: #E0EAF4 !important; border-radius: 5px !important;
-  }}
-  .stSlider > div > div {{ background-color: {CYAN} !important; }}
-  .stButton button {{
-      background: linear-gradient(90deg, #0A1E38, #122840) !important;
-      color: {CYAN} !important; border: 1px solid {CYAN} !important;
-      font-weight: 700 !important; border-radius: 5px !important;
-      transition: all 0.2s ease !important;
-  }}
-  .stButton button:hover {{
-      background: linear-gradient(90deg, #122840, #1A3050) !important;
-      color: #fff !important; box-shadow: 0 0 8px rgba(0,200,255,0.3) !important;
-  }}
-  .stCheckbox label {{ color: {TEXT} !important; }}
-  .js-plotly-plot, .plotly-graph-div {{ background: transparent !important; }}
-  #MainMenu, footer, [data-testid="stToolbar"] {{ visibility: hidden; }}
-  [data-testid="column"] {{ padding: 0 4px !important; }}
-  ::-webkit-scrollbar {{ width: 5px; height: 5px; }}
-  ::-webkit-scrollbar-track {{ background: {BG}; }}
-  ::-webkit-scrollbar-thumb {{ background: {BORD}; border-radius: 3px; }}
-  label[data-testid="stWidgetLabel"] > p {{
-      color: {MUTED} !important; font-size: .78rem !important;
-  }}
-  hr {{ border-color: {BORD} !important; }}
-  [data-testid="stSidebar"] .stButton button {{
-      font-size: .75rem !important; padding: 3px 8px !important;
-  }}
-  .stTabs [data-baseweb="tab-list"] {{
-      background-color: {PANEL} !important;
-      border-bottom: 1px solid {BORD} !important;
-  }}
-  .stTabs [data-baseweb="tab"] {{
-      color: {MUTED} !important; font-size: .78rem !important;
-  }}
-  .stTabs [aria-selected="true"] {{
-      color: {CYAN} !important; border-bottom: 2px solid {CYAN} !important;
-  }}
-  [data-testid="stMetric"] {{
-      background: {CARD} !important; border: 1px solid {BORD} !important;
-      border-radius: 6px !important; padding: 8px !important;
-  }}
-  [data-testid="stMetricValue"] {{ color: {TEXT} !important; }}
+div[data-baseweb="slider"] [data-testid="stSliderTrackFill"] {
+    background: linear-gradient(90deg, #FF6B00, #FFD700) !important;
+    height: 4px !important;
+}
+div[data-baseweb="slider"] [role="slider"] {
+    background-color: #FFD700 !important;
+    border: 2px solid #FFFFFF !important;
+    box-shadow: 0 0 8px #FFD700 !important;
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 
 # ══════════════════════════════════════════════════════════════════
