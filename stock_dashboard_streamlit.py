@@ -661,8 +661,17 @@ def chart_patterns(df):
         out.append(("W底型態", RED, "底部反轉訊號，留意突破"))
     if abs(h1-h2)/(h1+1e-9) < 0.03 and r[4:8].min() < h1*0.98:
         out.append(("M頭型態", GRN, "頭部反轉訊號，留意跌破"))
-    highs = [c[-20+i] for i in range(20) if c[-20+i] == max(c[max(0,-20+i-3):-20+i+4])]
-    lows  = [c[-20+i] for i in range(20) if c[-20+i] == min(c[max(0,-20+i-3):-20+i+4])]
+    highs = []
+    lows  = []
+    for i in range(20):
+        idx = len(c) - 20 + i
+        lo  = max(0, idx - 3)
+        hi  = min(len(c), idx + 4)
+        if hi > lo and len(c[lo:hi]) > 0:
+            if c[idx] == c[lo:hi].max():
+                highs.append(c[idx])
+            if c[idx] == c[lo:hi].min():
+                lows.append(c[idx])  
     if len(highs) >= 2 and len(lows) >= 2:
         if highs[-1] < highs[0] and lows[-1] > lows[0]:
             out.append(("三角收斂", CYAN, "整理末段，留意方向突破"))
