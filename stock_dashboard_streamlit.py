@@ -1905,7 +1905,7 @@ def main():
         st.markdown(html_alerts(alerts), unsafe_allow_html=True)
         st.markdown(html_key_levels(daily, close), unsafe_allow_html=True)
 
-    # ── 第二行：AI 評分 + 雷達圖 + 儀表板 ───────────────────────
+        # ── 第二行：AI 評分 + 雷達圖 + 儀表板 ───────────────────────
     col4, col5, col6 = st.columns([1.6, 1.2, 1])
     with col4:
         st.markdown(html_ai_summary(verdict, score, signals, stop, target, ai_col, close),
@@ -1915,20 +1915,14 @@ def main():
         st.plotly_chart(build_ai_radar(signals),
                         use_container_width=True,
                         config={"displayModeBar": False})
-        st.markdown
-            with col5:
-            st.plotly_chart(build_ai_radar(signals),
-                            use_container_width=True,
-                            config={"displayModeBar": False})
-            st.markdown(html_kline_patterns(kp, cp), unsafe_allow_html=True)
-
-        with col6:
-            st.plotly_chart(build_gauge(score),
-                            use_container_width=True,
-                            config={"displayModeBar": False})
-            st.markdown(html_main_force(
-                mf_stat, mf_trend, mf_cc, chip_c, chip_s, mf_col, daily),
-                unsafe_allow_html=True)
+        st.markdown(html_kline_patterns(kp, cp), unsafe_allow_html=True)
+    with col6:
+        st.plotly_chart(build_gauge(score),
+                        use_container_width=True,
+                        config={"displayModeBar": False})
+        st.markdown(html_main_force(
+            mf_stat, mf_trend, mf_cc, chip_c, chip_s, mf_col, daily),
+            unsafe_allow_html=True)
 
     # ── 第三行：量價 + 籌碼 + 法人/融資 ─────────────────────────
     col7, col8, col9 = st.columns([1, 1, 1])
@@ -1939,7 +1933,6 @@ def main():
             st.plotly_chart(obv_fig,
                             use_container_width=True,
                             config={"displayModeBar": False})
-
     with col8:
         st.markdown(html_chip(
             daily, mf_stat, chip_c, chip_s, mf_col,
@@ -1950,7 +1943,6 @@ def main():
             st.plotly_chart(wr_cci_fig,
                             use_container_width=True,
                             config={"displayModeBar": False})
-
     with col9:
         st.markdown(html_institutional(inst_data), unsafe_allow_html=True)
         st.markdown(html_margin(margin),            unsafe_allow_html=True)
@@ -1964,7 +1956,6 @@ def main():
             st.plotly_chart(bbw_fig,
                             use_container_width=True,
                             config={"displayModeBar": False})
-
     with col11:
         chip_fig = build_chip_dist_chart(chip_dist)
         if chip_fig:
@@ -1976,7 +1967,6 @@ def main():
                 box(f'<div style="color:{MUTED};font-size:.73rem;text-align:center;">'
                     f'⚠ 集保分散資料暫無</div>', "持股分散", "🥧"),
                 unsafe_allow_html=True)
-
     with col12:
         st.markdown(html_news(news_list), unsafe_allow_html=True)
 
@@ -2023,3 +2013,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
