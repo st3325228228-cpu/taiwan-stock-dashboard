@@ -1905,7 +1905,7 @@ def main():
         st.markdown(html_alerts(alerts), unsafe_allow_html=True)
         st.markdown(html_key_levels(daily, close), unsafe_allow_html=True)
 
-        # ── 第二行：AI 評分 + 雷達圖 + 儀表板 ───────────────────────
+    # ── 第二行：AI 評分 + 雷達圖 + 儀表板 ───────────────────────
     col4, col5, col6 = st.columns([1.6, 1.2, 1])
     with col4:
         st.markdown(html_ai_summary(verdict, score, signals, stop, target, ai_col, close),
@@ -1923,6 +1923,7 @@ def main():
         st.markdown(html_main_force(
             mf_stat, mf_trend, mf_cc, chip_c, chip_s, mf_col, daily),
             unsafe_allow_html=True)
+
 
     # ── 第三行：量價 + 籌碼 + 法人/融資 ─────────────────────────
     col7, col8, col9 = st.columns([1, 1, 1])
