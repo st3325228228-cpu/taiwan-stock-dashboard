@@ -1300,7 +1300,7 @@ def html_realtime(rt: dict) -> str:
         f'<div style="color:{MUTED};font-size:.65rem;margin-top:3px;">'
         f'{source} · {t_str}</div></div>'
     )
-        rows = "".join([
+    rows = "".join([
         row_item("開盤", f"{rt.get('open',  0):,.2f}"),
         row_item("最高", f"{rt.get('high',  0):,.2f}", RED),
         row_item("最低", f"{rt.get('low',   0):,.2f}", GRN),
