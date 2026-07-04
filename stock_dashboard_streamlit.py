@@ -1,6 +1,6 @@
 """
-台股技術分析儀表板 ── Streamlit 完整進階版 v3.1
-修正：並行請求、shareholder URL、融資融券欄位保護、快取優化
+台股技術分析儀表板 ── Streamlit 完整進階版 v3.2
+修正：日期換算誤差、TPEx重複請求、欄位動態比對、單層併發、股東季度動態化
 依賴：pip install streamlit yfinance plotly pandas numpy requests beautifulsoup4 lxml
 執行：streamlit run stock_dashboard_streamlit.py
 """
@@ -24,7 +24,7 @@ from bs4 import BeautifulSoup
 #  頁面設定
 # ══════════════════════════════════════════════════════════════════
 st.set_page_config(
-    page_title="台股技術分析儀表板 v3.1",
+    page_title="台股技術分析儀表板 v3.2",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -83,15 +83,41 @@ div[data-baseweb="slider"] [role="slider"] {
 # ══════════════════════════════════════════════════════════════════
 
 def _get(url: str, params: dict = None, timeout: int = 8,
-         is_json: bool = True):
-    """統一 GET 請求，失敗回傳 None"""
+         is_json: bool = True, retry_on_429: bool = True):
+    """
+    統一 GET 請求，失敗回傳 None
+    [FIX-5] 遇到 429（請求過於頻繁）時，退避 1.2 秒後重試一次，
+    避免短時間高頻抓取被 TWSE / TPEx 暫時封鎖。
+    """
     try:
         resp = requests.get(url, headers=HEADERS,
                             params=params, timeout=timeout)
         resp.raise_for_status()
         return resp.json() if is_json else resp
+    except requests.exceptions.HTTPError as e:
+        if (retry_on_429 and e.response is not None
+                and e.response.status_code == 429):
+            time.sleep(1.2)
+            try:
+                resp = requests.get(url, headers=HEADERS,
+                                    params=params, timeout=timeout)
+                resp.raise_for_status()
+                return resp.json() if is_json else resp
+            except Exception:
+                return None
+        return None
+    except requests.exceptions.Timeout:
+        return None
     except Exception:
         return None
+
+
+def _is_trading_day(d: datetime) -> bool:
+    """
+    [FIX-3] 簡易交易日判斷（僅過濾週末，不含國定假日）。
+    用於避免融資融券／三大法人在假日做無效的重試請求。
+    """
+    return d.weekday() < 5
 
 
 # ── 1. TWSE 即時報價（盤中）─────────────────────────────────────
@@ -128,14 +154,23 @@ def crawl_realtime_twse(stock_id: str) -> dict:
 
 
 # ── 2. TPEX 即時報價（上櫃）────────────────────────────────────
+#  [FIX-2] 拆成「全市場快取」與「單股查詢」，
+#  避免每查一檔股票就重新下載整包全市場資料。
+
+@st.cache_data(ttl=30, show_spinner=False)
+def _fetch_tpex_all() -> list:
+    """一次性抓取全部上櫃股票即時報價，30 秒內所有查詢共用此快取"""
+    url  = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
+    data = _get(url)
+    return data if isinstance(data, list) else []
+
 
 @st.cache_data(ttl=30, show_spinner=False)
 def crawl_realtime_tpex(stock_id: str) -> dict:
     """
-    櫃買中心即時報價
+    櫃買中心即時報價（透過共用快取的全市場資料查找單一股票）
     """
-    url  = "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes"
-    data = _get(url)
+    data = _fetch_tpex_all()
     if not data:
         return {}
     for row in data:
@@ -175,6 +210,15 @@ def crawl_realtime(stock_id: str) -> dict:
 
 
 # ── 4. TWSE 每日收盤資料（歷史）────────────────────────────────
+#  [FIX-1] 改用精確月份回推，避免用「天數估算月份」造成日期偏移。
+
+def _month_back(base: datetime, i: int) -> datetime:
+    """精確往前推 i 個月（該月 1 號），避免天數估算誤差累積"""
+    month = base.month - i
+    year  = base.year + (month - 1) // 12
+    month = (month - 1) % 12 + 1
+    return base.replace(year=year, month=month, day=1)
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def crawl_daily_twse(stock_id: str, months: int = 3) -> pd.DataFrame:
@@ -182,8 +226,9 @@ def crawl_daily_twse(stock_id: str, months: int = 3) -> pd.DataFrame:
     抓取最近 N 個月的每日收盤資料（TWSE 歷史）
     """
     frames = []
+    this_month_1st = datetime.today().replace(day=1)
     for i in range(months):
-        d = datetime.today().replace(day=1) - timedelta(days=i * 28)
+        d = _month_back(this_month_1st, i)          # [FIX-1]
         date_str = d.strftime("%Y%m%d")
         url  = "https://www.twse.com.tw/exchangeReport/STOCK_DAY"
         data = _get(url, params={
@@ -218,29 +263,49 @@ def crawl_daily_twse(stock_id: str, months: int = 3) -> pd.DataFrame:
     return df
 
 
-# ── 5. 融資融券 ─────────────────────────────────────────────────
+# ── 5. 動態欄位比對工具（融資融券 / 三大法人共用）──────────────
+#  [FIX-3] TWSE 的 MI_MARGN / T86 沒有正式文件保證欄位順序，
+#  改成優先用回傳資料中的 "fields" 欄位名稱動態定位，
+#  找不到才退回原本寫死的 index，降低「欄位錯位但不報錯」的風險。
 
-# TWSE MI_MARGN 欄位對應（依官方文件，欄位順序可能隨改版異動）
-_MARGIN_COL_MAP = {
-    "stock_id":    0,
-    "stock_name":  1,
-    "margin_buy":  2,
-    "margin_sell": 3,
-    "margin_bal":  4,
-    "short_sell":  8,
-    "short_cover": 9,
-    "short_bal":   10,
-}
+def _build_col_map(fields, keywords: dict, fallback: dict) -> dict:
+    """依 API 回傳欄位名稱動態定位 index；找不到則使用備援位置"""
+    if not fields:
+        return dict(fallback)
+    col_map = {}
+    for key, kw in keywords.items():
+        idx = next((i for i, f in enumerate(fields) if kw in str(f)), None)
+        col_map[key] = idx if idx is not None else fallback.get(key, -1)
+    return col_map
 
-def _safe_margin_col(row: list, key: str) -> int:
-    """安全取得融資融券欄位，欄位不存在時回傳 0"""
-    idx = _MARGIN_COL_MAP.get(key, -1)
-    if idx < 0 or idx >= len(row):
+
+def _safe_col(row: list, col_map: dict, key: str) -> int:
+    """安全取得欄位數值，index 不存在或轉換失敗時回傳 0"""
+    idx = col_map.get(key, -1)
+    if idx is None or idx < 0 or idx >= len(row):
         return 0
     try:
         return int(str(row[idx]).replace(",", "").replace(" ", ""))
     except Exception:
         return 0
+
+
+# ── 6. 融資融券 ─────────────────────────────────────────────────
+
+_MARGIN_KEYWORDS = {
+    "stock_id":    "證券代號",
+    "margin_buy":  "融資買進",
+    "margin_sell": "融資賣出",
+    "margin_bal":  "融資餘額",
+    "short_sell":  "融券賣出",
+    "short_cover": "融券買進",
+    "short_bal":   "融券餘額",
+}
+# 備援欄位（依 TWSE 官方文件慣例序位；改版時作為 fallback）
+_MARGIN_COL_MAP_FALLBACK = {
+    "stock_id": 0, "margin_buy": 2, "margin_sell": 3, "margin_bal": 4,
+    "short_sell": 8, "short_cover": 9, "short_bal": 10,
+}
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def crawl_margin(stock_id: str) -> dict:
@@ -248,9 +313,17 @@ def crawl_margin(stock_id: str) -> dict:
     TWSE 融資融券餘額
     回傳 dict: margin_buy, margin_sell, margin_bal,
                short_sell, short_cover, short_bal, date
+    [FIX-3] 只在交易日發送請求，最多回溯 12 天以湊到 5 個有效交易日，
+    並用動態欄位比對取代寫死的 index。
     """
-    for delta in range(0, 5):
-        date_str = (datetime.today() - timedelta(days=delta)).strftime("%Y%m%d")
+    checked, delta = 0, 0
+    while checked < 5 and delta < 12:
+        date = datetime.today() - timedelta(days=delta)
+        delta += 1
+        if not _is_trading_day(date):
+            continue
+        checked += 1
+        date_str = date.strftime("%Y%m%d")
         url  = "https://www.twse.com.tw/exchangeReport/MI_MARGN"
         data = _get(url, params={
             "response": "json", "date": date_str,
@@ -258,49 +331,52 @@ def crawl_margin(stock_id: str) -> dict:
         })
         if not data or data.get("stat") != "OK":
             continue
+        col_map = _build_col_map(data.get("fields"), _MARGIN_KEYWORDS,
+                                  _MARGIN_COL_MAP_FALLBACK)
+        sid_idx = col_map.get("stock_id", 0)
         for row in data.get("data", []):
-            if not row or str(row[0]).strip() != stock_id:
+            if not row or sid_idx >= len(row) or str(row[sid_idx]).strip() != stock_id:
                 continue
             return {
-                "margin_buy":   _safe_margin_col(row, "margin_buy"),
-                "margin_sell":  _safe_margin_col(row, "margin_sell"),
-                "margin_bal":   _safe_margin_col(row, "margin_bal"),
-                "short_sell":   _safe_margin_col(row, "short_sell"),
-                "short_cover":  _safe_margin_col(row, "short_cover"),
-                "short_bal":    _safe_margin_col(row, "short_bal"),
+                "margin_buy":   _safe_col(row, col_map, "margin_buy"),
+                "margin_sell":  _safe_col(row, col_map, "margin_sell"),
+                "margin_bal":   _safe_col(row, col_map, "margin_bal"),
+                "short_sell":   _safe_col(row, col_map, "short_sell"),
+                "short_cover":  _safe_col(row, col_map, "short_cover"),
+                "short_bal":    _safe_col(row, col_map, "short_bal"),
                 "date":         date_str,
             }
     return {}
 
 
-# ── 6. 三大法人（升級版）────────────────────────────────────────
+# ── 7. 三大法人（升級版）────────────────────────────────────────
 
-# TWSE T86 欄位對應
-_INST_COL_MAP = {
-    "stock_id": 0,
-    "foreign":  4,
-    "invest":   10,
-    "dealer":   14,
-    "total":    18,
+_INST_KEYWORDS = {
+    "stock_id": "證券代號",
+    "foreign":  "外陸資買賣超股數",
+    "invest":   "投信買賣超股數",
+    "dealer":   "自營商買賣超股數",
+    "total":    "三大法人買賣超股數",
 }
-
-def _safe_inst_col(row: list, key: str) -> int:
-    """安全取得三大法人欄位"""
-    idx = _INST_COL_MAP.get(key, -1)
-    if idx < 0 or idx >= len(row):
-        return 0
-    try:
-        return int(str(row[idx]).replace(",", "").replace(" ", ""))
-    except Exception:
-        return 0
+# 備援欄位（依 TWSE 官方文件慣例序位；改版時作為 fallback）
+_INST_COL_MAP_FALLBACK = {
+    "stock_id": 0, "foreign": 4, "invest": 10, "dealer": 14, "total": 18,
+}
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def crawl_institutional(stock_id: str) -> dict:
     """
     三大法人買賣超（外資、投信、自營商）
+    [FIX-3] 只在交易日發送請求，並用動態欄位比對取代寫死的 index。
     """
-    for delta in range(0, 5):
-        date_str = (datetime.today() - timedelta(days=delta)).strftime("%Y%m%d")
+    checked, delta = 0, 0
+    while checked < 5 and delta < 12:
+        date = datetime.today() - timedelta(days=delta)
+        delta += 1
+        if not _is_trading_day(date):
+            continue
+        checked += 1
+        date_str = date.strftime("%Y%m%d")
         url  = "https://www.twse.com.tw/fund/T86"
         data = _get(url, params={
             "response": "json", "date": date_str,
@@ -308,20 +384,23 @@ def crawl_institutional(stock_id: str) -> dict:
         })
         if not data or data.get("stat") != "OK":
             continue
+        col_map = _build_col_map(data.get("fields"), _INST_KEYWORDS,
+                                  _INST_COL_MAP_FALLBACK)
+        sid_idx = col_map.get("stock_id", 0)
         for row in data.get("data", []):
-            if not row or str(row[0]).strip() != stock_id:
+            if not row or sid_idx >= len(row) or str(row[sid_idx]).strip() != stock_id:
                 continue
             return {
-                "foreign":  _safe_inst_col(row, "foreign"),
-                "invest":   _safe_inst_col(row, "invest"),
-                "dealer":   _safe_inst_col(row, "dealer"),
-                "total":    _safe_inst_col(row, "total"),
+                "foreign":  _safe_col(row, col_map, "foreign"),
+                "invest":   _safe_col(row, col_map, "invest"),
+                "dealer":   _safe_col(row, col_map, "dealer"),
+                "total":    _safe_col(row, col_map, "total"),
                 "date":     date_str,
             }
     return {}
 
 
-# ── 7. 股票新聞（Yahoo RSS）─────────────────────────────────────
+# ── 8. 股票新聞（Yahoo RSS）─────────────────────────────────────
 
 @st.cache_data(ttl=600, show_spinner=False)
 def crawl_news(stock_id: str, name: str = "", limit: int = 8) -> list:
@@ -363,7 +442,7 @@ def crawl_news(stock_id: str, name: str = "", limit: int = 8) -> list:
     return results[:limit]
 
 
-# ── 8. 個股基本面（TWSE 公開資訊觀測站）────────────────────────
+# ── 9. 個股基本面（TWSE 公開資訊觀測站）────────────────────────
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def crawl_fundamental(stock_id: str) -> dict:
@@ -392,8 +471,23 @@ def crawl_fundamental(stock_id: str) -> dict:
     }
 
 
-# ── 9. 股東持股分級（TWSE MOPS）────────────────────────────────
-#  修正：移除無效中文路徑，直接使用 MOPS API
+# ── 10. 股東持股分級（TWSE MOPS）────────────────────────────────
+#  [FIX-4] 移除寫死的「year=113&season=4」，改為動態計算
+#  最近一個「應已公告」的季度，避免資料過期或抓不到任何內容。
+
+def _latest_available_season(today: datetime = None) -> tuple:
+    """
+    推算最近一個已公告的股東持股分級季度（民國年, 季）。
+    財報公告通常有 1~2 個月延遲，因此往前推一整季更保險。
+    """
+    today = today or datetime.today()
+    roc_year = today.year - 1911
+    q = (today.month - 1) // 3 + 1   # 當前所在季度 1~4
+    q -= 1                            # 往前推一季，確保已公告
+    if q == 0:
+        return roc_year - 1, 4
+    return roc_year, q
+
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def crawl_shareholder(stock_id: str) -> dict:
@@ -401,11 +495,12 @@ def crawl_shareholder(stock_id: str) -> dict:
     大股東持股比例（前 5 大股東）
     來源：公開資訊觀測站 ajax_t51sb07
     """
+    year, season = _latest_available_season()
     url = (
         "https://mops.twse.com.tw/mops/web/ajax_t51sb07"
         "?encodeURIComponent=1&step=1&firstin=1"
         "&off=1&keyword4=&code1=&TYPEK=all&isnew=false"
-        f"&co_id={stock_id}&year=113&season=4"
+        f"&co_id={stock_id}&year={year}&season={season}"
     )
     resp = _get(url, is_json=False, timeout=10)
     if resp is None:
@@ -424,12 +519,12 @@ def crawl_shareholder(stock_id: str) -> dict:
                     "name": cols[1] if len(cols) > 1 else "—",
                     "pct":  cols[2] if len(cols) > 2 else "—",
                 })
-        return {"holders": holders}
+        return {"holders": holders, "year": year, "season": season}
     except Exception:
         return {}
 
 
-# ── 10. 每週籌碼（集保戶股權分散）──────────────────────────────
+# ── 11. 每週籌碼（集保戶股權分散）──────────────────────────────
 
 @st.cache_data(ttl=86400, show_spinner=False)
 def crawl_chip_distribution(stock_id: str) -> list:
@@ -459,41 +554,6 @@ def crawl_chip_distribution(stock_id: str) -> list:
         return []
 
 
-# ── 11. 並行抓取所有爬蟲資料（新增）────────────────────────────
-
-def fetch_all_crawlers(stock_id: str, name: str = "") -> dict:
-    """
-    使用 ThreadPoolExecutor 並行執行所有爬蟲，
-    將總等待時間從 ~4-6s 縮短至 ~1-2s。
-    回傳 dict: rt, inst, margin, fund, chip_dist, news
-    """
-    tasks = {
-        "rt":        lambda: crawl_realtime(stock_id),
-        "inst":      lambda: crawl_institutional(stock_id),
-        "margin":    lambda: crawl_margin(stock_id),
-        "fund":      lambda: crawl_fundamental(stock_id),
-        "chip_dist": lambda: crawl_chip_distribution(stock_id),
-        "news":      lambda: crawl_news(stock_id, name),
-    }
-    results = {k: {} for k in tasks}
-    try:
-        with ThreadPoolExecutor(max_workers=6) as executor:
-            future_map = {executor.submit(fn): key
-                          for key, fn in tasks.items()}
-            for future in as_completed(future_map, timeout=12):
-                key = future_map[future]
-                try:
-                    results[key] = future.result()
-                except Exception:
-                    results[key] = {} if key != "news" else []
-    except Exception:
-        pass
-    # 確保 news 預設為 list
-    if not isinstance(results.get("news"), list):
-        results["news"] = []
-    return results
-
-
 # ══════════════════════════════════════════════════════════════════
 #  技術指標
 # ══════════════════════════════════════════════════════════════════
@@ -508,6 +568,11 @@ def safe_float(val, default: float = 0.0) -> float:
 def ma(s, n):   return s.rolling(n).mean()
 def ema(s, n):  return s.ewm(span=n, adjust=False).mean()
 
+看到了,這是上次程式碼在 `kd()` 函式處被截斷的地方。我接著把剩餘部分**完整**補上,延續之前的 7 項修正。
+
+## 📍 從 `kd()` 函式開始接續
+
+```python
 def kd(df, n=9):
     lo  = df["Low"].rolling(n).min()
     hi  = df["High"].rolling(n).max()
@@ -843,7 +908,7 @@ def export_summary(ticker, name, close, pct, kv, rv, mv, sv,
     rr = abs(target-close) / (abs(close-stop) + 1e-9)
     lines = [
         "=" * 50,
-        f"  {name}（{ticker}）技術分析報告 v3.1",
+        f"  {name}（{ticker}）技術分析報告 v3.2",
         "=" * 50,
         f"日期　　：{datetime.today().strftime('%Y-%m-%d %H:%M')}",
         f"收盤價　：{close:,.2f}　漲跌：{pct:+.2f}%",
@@ -1240,6 +1305,11 @@ def html_realtime(rt: dict) -> str:
         f'<div style="color:{MUTED};font-size:.65rem;margin-top:3px;">'
         f'{source} · {t_str}</div></div>'
     )
+    收到,接續補完 `html_realtime` 剩餘部分,並把後面所有函式一次寫完到檔案結尾。
+
+## 📍 從 `html_realtime` 的 rows 拼接處接續
+
+```python
     rows = "".join([
         row_item("開盤", f"{rt.get('open',  0):,.2f}"),
         row_item("最高", f"{rt.get('high',  0):,.2f}", RED),
@@ -1748,6 +1818,54 @@ def render_sidebar():
 
 
 # ══════════════════════════════════════════════════════════════════
+#  並行抓取所有資料（單層併發）
+# ══════════════════════════════════════════════════════════════════
+#  [FIX-6] 原本 main() 用「外層 ThreadPoolExecutor(2) 包住
+#  fetch_all + 內層又開 6 workers 的 fetch_all_crawlers」，
+#  等於同時存在 1+6=7 條線程，屬於不必要的巢狀併發。
+#  現改為單層 7 workers 的 fetch_everything，任務數與線程數對齊，
+#  資源用量更好預測，部署到資源受限環境也更穩定。
+
+def fetch_everything(ticker: str, stock_id: str, name: str, days: int) -> dict:
+    """
+    單層併發抓取 K 線 + 所有爬蟲資料。
+    回傳 dict: ohlc(tuple), rt, inst, margin, fund, chip_dist, news
+    """
+    tasks = {
+        "ohlc":      lambda: fetch_all(ticker, days),
+        "rt":        lambda: crawl_realtime(stock_id),
+        "inst":      lambda: crawl_institutional(stock_id),
+        "margin":    lambda: crawl_margin(stock_id),
+        "fund":      lambda: crawl_fundamental(stock_id),
+        "chip_dist": lambda: crawl_chip_distribution(stock_id),
+        "news":      lambda: crawl_news(stock_id, name),
+    }
+    results = {k: None for k in tasks}
+    try:
+        with ThreadPoolExecutor(max_workers=len(tasks)) as executor:
+            future_map = {executor.submit(fn): key
+                          for key, fn in tasks.items()}
+            for future in as_completed(future_map, timeout=15):
+                key = future_map[future]
+                try:
+                    results[key] = future.result()
+                except Exception:
+                    results[key] = None
+    except Exception:
+        pass
+    # 確保各欄位有安全預設值，避免後續呼叫端 None 判斷失誤
+    if results.get("ohlc") is None:
+        results["ohlc"] = (None, None, None)
+    for k in ("rt", "inst", "margin", "fund"):
+        if not isinstance(results.get(k), dict):
+            results[k] = {}
+    for k in ("chip_dist", "news"):
+        if not isinstance(results.get(k), list):
+            results[k] = []
+    return results
+
+
+# ══════════════════════════════════════════════════════════════════
 #  主頁面
 # ══════════════════════════════════════════════════════════════════
 
@@ -1761,7 +1879,7 @@ def main():
         f'border-radius:8px;display:flex;align-items:center;gap:12px;">'
         f'<span style="font-size:1.6rem;">📈</span><div>'
         f'<h1 style="color:#E0EAF4;margin:0;font-size:1.1rem;font-weight:900;'
-        f'letter-spacing:1px;">台股技術分析儀表板 v3.1</h1>'
+        f'letter-spacing:1px;">台股技術分析儀表板 v3.2</h1>'
         f'<p style="color:{MUTED};margin:2px 0 0;font-size:.72rem;">'
         f'K線·均線·KD·MACD·RSI·布林·費波·VWAP·OBV·威廉%R·CCI·'
         f'即時報價·融資融券·三大法人·新聞·籌碼分散</p></div></div>',
@@ -1817,20 +1935,18 @@ def main():
     except Exception:
         name=ticker; sector=industry="—"; pe=mktcap=None
 
-    # ── 並行抓取：K線 + 所有爬蟲同步進行 ────────────────────────
+    # ── 單層並行抓取：K線 + 所有爬蟲同步進行 ─────────────────────
+    # [FIX-6] 改用 fetch_everything，移除巢狀 ThreadPoolExecutor
     with st.spinner(f"正在抓取 {ticker} 全部資料…"):
-        with ThreadPoolExecutor(max_workers=2) as ex:
-            f_ohlc    = ex.submit(fetch_all, ticker, period_days)
-            f_crawl   = ex.submit(fetch_all_crawlers, stock_id, name)
-        daily, weekly, monthly = f_ohlc.result()
-        crawl_results          = f_crawl.result()
+        all_results = fetch_everything(ticker, stock_id, name, period_days)
 
-    rt_data   = crawl_results.get("rt",        {})
-    inst_data = crawl_results.get("inst",       {})
-    margin    = crawl_results.get("margin",     {})
-    fund_data = crawl_results.get("fund",       {})
-    chip_dist = crawl_results.get("chip_dist",  [])
-    news_list = crawl_results.get("news",       [])
+    daily, weekly, monthly = all_results["ohlc"]
+    rt_data   = all_results["rt"]
+    inst_data = all_results["inst"]
+    margin    = all_results["margin"]
+    fund_data = all_results["fund"]
+    chip_dist = all_results["chip_dist"]
+    news_list = all_results["news"]
 
     if daily is None or daily.empty:
         st.error(f"❌ 無法取得 {ticker}，請確認代號或網路。"); return
@@ -1905,7 +2021,7 @@ def main():
         st.markdown(html_alerts(alerts), unsafe_allow_html=True)
         st.markdown(html_key_levels(daily, close), unsafe_allow_html=True)
 
-    # ── 第二行：AI 評分 + 雷達圖 + 儀表板 ───────────────────────
+        # ── 第二行：AI 評分 + 雷達圖 + 儀表板 ───────────────────────
     col4, col5, col6 = st.columns([1.6, 1.2, 1])
     with col4:
         st.markdown(html_ai_summary(verdict, score, signals, stop, target, ai_col, close),
@@ -2015,3 +2131,4 @@ def main():
 if __name__ == "__main__":
     main()
 
+    
