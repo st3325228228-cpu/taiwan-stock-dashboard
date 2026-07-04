@@ -568,11 +568,6 @@ def safe_float(val, default: float = 0.0) -> float:
 def ma(s, n):   return s.rolling(n).mean()
 def ema(s, n):  return s.ewm(span=n, adjust=False).mean()
 
-看到了,這是上次程式碼在 `kd()` 函式處被截斷的地方。我接著把剩餘部分**完整**補上,延續之前的 7 項修正。
-
-## 📍 從 `kd()` 函式開始接續
-
-```python
 def kd(df, n=9):
     lo  = df["Low"].rolling(n).min()
     hi  = df["High"].rolling(n).max()
