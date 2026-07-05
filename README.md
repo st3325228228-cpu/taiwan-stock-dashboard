@@ -58,20 +58,3 @@ Streamlit Web App 開發
 
 本專案提供的股票資料與分析結果僅供學習與研究使用，不構成任何投資建議。
 
-
-## 一個需要確認的地方
-
-你這個 GitHub 專案檔名是：
-
-```text
-stock_dashboard_streamlit.py
-
-所以 README 寫 Streamlit 是正確的。
-
-不過你之前提供的線上網址名稱是 stock-gradio。若該網址其實不是這個 Streamlit 專案，先把 README 中的「線上展示」網址暫時改成：
-
-## 線上展示
-
-線上展示網址整理中。
-
-避免 GitHub 程式與展示網站對不上。
