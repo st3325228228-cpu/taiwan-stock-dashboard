@@ -1,27 +1,3 @@
-# Taiwan Stock Dashboard
-
-使用 Python 與 Streamlit 建立的台灣股票資料分析儀表板，可查詢股票歷史資料、技術指標與走勢圖表。
-
-## 專案功能
-
-- 查詢股票歷史價格
-- 顯示股票走勢圖
-- 計算常見技術指標
-- 使用互動式圖表呈現資料
-- 支援股票資料分析與比較
-- 提供 Streamlit 網頁操作介面
-
-## 使用技術
-
-- Python
-- Streamlit
-- pandas
-- NumPy
-- Plotly
-- yfinance
-- requests
-- BeautifulSoup
-
 ## 專案檔案
 
 ```text
@@ -31,30 +7,45 @@ taiwan-stock-dashboard/
 ├── requirements.txt
 ├── stock_dashboard_streamlit.py
 └── README.md
-執行方式
-1. 下載專案
+```
+
+## 執行方式
+
+### 1. 下載專案
+
+```bash
 git clone https://github.com/st3325228228-cpu/taiwan-stock-dashboard.git
 cd taiwan-stock-dashboard
-2. 安裝套件
+```
+
+### 2. 安裝套件
+
+```bash
 pip install -r requirements.txt
-3. 啟動程式
+```
+
+### 3. 啟動程式
+
+```bash
 streamlit run stock_dashboard_streamlit.py
-線上展示
+```
 
-開啟 Hugging Face Space
+## 線上展示
 
-專案目的
+[開啟 Taiwan Stock Dashboard](https://taiwan-stock-dashboard-dfmapmtnrxbnr9mpwfojpm.streamlit.app)
 
-本專案用於練習與展示以下能力：
+## 專案目的
 
-Python 資料處理
-股票資料取得
-網頁爬蟲
-技術指標計算
-資料視覺化
-Streamlit Web App 開發
-雲端部署
-注意事項
+本專案用於練習與展示：
+
+- Python 資料處理
+- 股票資料取得
+- 網頁資料擷取
+- 技術指標計算
+- 互動式資料視覺化
+- Streamlit Web App 開發
+- 雲端部署
+
+## 注意事項
 
 本專案提供的股票資料與分析結果僅供學習與研究使用，不構成任何投資建議。
-
